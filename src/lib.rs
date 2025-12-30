@@ -4,17 +4,6 @@
 //! This extension allows you to create inverted indexes on text columns
 //! and run relevance-ranked searches directly from SQL.
 //!
-//! ## Modules
-//!
-//! - [`index`] - Index management (create, drop, refresh)
-//! - [`search`] - Search execution (query, ranked results)
-//! - [`trigger`] - Sync triggers (keep index up-to-date)
-//! - [`utils`] - Utility functions (index info)
-
-// =============================================================================
-// MODULE DECLARATIONS
-// =============================================================================
-// Each module contains related functionality, split for maintainability.
 
 /// Index management: create, drop, refresh indexes
 pub mod index;
@@ -28,17 +17,9 @@ pub mod trigger;
 /// Utility functions: index info, diagnostics
 pub mod utils;
 
-// =============================================================================
-// EXTENSION REGISTRATION
-// =============================================================================
-
 // This macro registers the extension with PostgreSQL.
 // It tells Postgres: "This is an extension called 'pdb' at version X"
 ::pgrx::pg_module_magic!();
-
-// =============================================================================
-// TESTS
-// =============================================================================
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
