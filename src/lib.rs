@@ -22,7 +22,7 @@ pub mod utils;
 ::pgrx::pg_module_magic!();
 
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
+#[pgrx::prelude::pg_schema]
 mod tests {
     use pgrx::prelude::*;
 
@@ -30,7 +30,7 @@ mod tests {
     fn test_create_index() {
         // This test will run inside a real Postgres instance
         let result = crate::index::create_bm25_index("test_table", "test_column");
-        assert!(result);
+        assert!(result.is_ok());
     }
 }
 

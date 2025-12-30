@@ -73,6 +73,16 @@ pub fn create_bm25_index(
 
     // 2. Create index directory
     let index_path = get_index_path(table_name, column_name);
+
+    // Check if index already exists
+    if index_path.exists() {
+        return Err(format!(
+            "Index already exists on {}.{}. Drop it first.",
+            table_name, column_name
+        )
+        .into());
+    }
+
     std::fs::create_dir_all(&index_path)?;
 
     // 3. Create Tantivy index
@@ -80,7 +90,9 @@ pub fn create_bm25_index(
     let mut writer: IndexWriter = index.writer(50_000_000)?; // 50MB buffer
 
     // 4. Scan table and add documents
-    let mut indexed_count = 0u64;
+    let indexed_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let count_clone = indexed_count.clone();
+
     Spi::connect(|client| {
         // Cast ctid to text for simpler extraction
         let query = format!("SELECT ctid::text, {} FROM {}", column_name, table_name);
@@ -97,7 +109,7 @@ pub fn create_bm25_index(
                         row_id_field => id,
                         content_field => txt
                     ));
-                    indexed_count += 1;
+                    count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         });
@@ -108,7 +120,13 @@ pub fn create_bm25_index(
     // 5. Commit
     writer.commit()?;
 
-    pgrx::info!("Created BM25 index on {}.{}", table_name, column_name);
+    let count = indexed_count.load(std::sync::atomic::Ordering::Relaxed);
+    pgrx::info!(
+        "✓ Created BM25 index on {}.{} ({} documents)",
+        table_name,
+        column_name,
+        count
+    );
     Ok(true)
 }
 
