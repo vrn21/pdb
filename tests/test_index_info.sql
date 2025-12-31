@@ -23,7 +23,7 @@ SELECT * FROM bm25_index_info('nonexistent', 'fake');
 \echo ''
 \echo '2. Creating test table and index...'
 CREATE TABLE info_test (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     content TEXT
 );
 

@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS pdb;
 -- 2. Create a test table
 DROP TABLE IF EXISTS test_articles;
 CREATE TABLE test_articles (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     title TEXT,
     body TEXT
 );

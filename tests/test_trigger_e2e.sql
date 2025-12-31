@@ -1,24 +1,26 @@
 -- ================================================================================
--- PDB Extension - End-to-End Trigger Test
+-- PDB Extension - End-to-End Trigger Test (v2 - Transaction Safe)
 -- ================================================================================
--- This test verifies that automatic index synchronization works correctly
--- for INSERT, UPDATE, and DELETE operations.
+-- This test verifies:
+-- 1. Automatic index synchronization for INSERT, UPDATE, DELETE
+-- 2. Transaction safety (ROLLBACK discards index changes)
+-- 3. Primary key correlation (JOINs work correctly)
 --
 -- IMPORTANT: Run this after CREATE EXTENSION pdb;
 -- ================================================================================
 
 \echo '========================================='
-\echo 'PDB Extension - Trigger E2E Test'
+\echo 'PDB Extension - Trigger E2E Test v2'
 \echo '========================================='
 \echo ''
 
 -- Cleanup from any previous tests
 DROP TABLE IF EXISTS e2e_test CASCADE;
 
--- Create test table
+-- Create test table (using BIGSERIAL for i64 compatibility)
 \echo '1. Creating test table...'
 CREATE TABLE e2e_test (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     title TEXT,
     content TEXT
 );
@@ -61,7 +63,23 @@ FROM bm25_search('e2e_test', 'content', 'rust');
 
 \echo ''
 \echo '========================================='
-\echo 'TEST 2: UPDATE Operations'
+\echo 'TEST 2: JOIN with Primary Key'
+\echo '========================================='
+
+-- Test that pk column in search results matches the actual table PK
+\echo 'Testing JOIN on pk column...'
+SELECT 
+    e.id as table_id, 
+    s.pk as search_pk,
+    e.title,
+    round(s.score::numeric, 4) as score,
+    CASE WHEN e.id = s.pk THEN '✓' ELSE '✗' END as pk_match
+FROM bm25_search('e2e_test', 'content', 'rust') s
+JOIN e2e_test e ON e.id = s.pk;
+
+\echo ''
+\echo '========================================='
+\echo 'TEST 3: UPDATE Operations'
 \echo '========================================='
 
 -- Update a document
@@ -90,7 +108,7 @@ FROM bm25_search('e2e_test', 'content', 'data science');
 
 \echo ''
 \echo '========================================='
-\echo 'TEST 3: DELETE Operations'
+\echo 'TEST 4: DELETE Operations'
 \echo '========================================='
 
 -- Delete a document
@@ -108,34 +126,69 @@ FROM bm25_search('e2e_test', 'content', 'rust');
 
 \echo ''
 \echo '========================================='
-\echo 'TEST 4: Multiple Operations'
+\echo 'TEST 5: Transaction ROLLBACK'
 \echo '========================================='
 
-\echo 'Inserting 2 more documents...'
+-- Test that ROLLBACK discards index changes
+\echo 'Starting transaction and inserting a document...'
+BEGIN;
 INSERT INTO e2e_test (title, content) VALUES
-    ('Go Lang', 'Go is a compiled language designed at Google'),
-    ('Rust Advanced', 'Rust provides memory safety without garbage collection');
+    ('Should Not Exist', 'This rollback document should never be searchable');
+\echo 'Rolling back transaction...'
+ROLLBACK;
 
-\echo 'Searching for "rust" (should find 2 results)...'
+-- Search for the rolled-back content - should NOT find it
+\echo 'Searching for "rollback" (should find 0 - transaction was rolled back)...'
 SELECT 
-    CASE WHEN COUNT(*) = 2 
-    THEN '✓ Multi-operation test passed' 
-    ELSE '✗ ERROR: Expected 2 results, found ' || COUNT(*)
+    CASE WHEN COUNT(*) = 0 
+    THEN '✓ ROLLBACK test passed - index changes were discarded' 
+    ELSE '✗ ERROR: Found rolled-back content in index! Transaction safety broken!'
     END as status
-FROM bm25_search('e2e_test', 'content', 'rust');
+FROM bm25_search('e2e_test', 'content', 'rollback');
 
 \echo ''
 \echo '========================================='
-\echo 'TEST 5: Results Display'
+\echo 'TEST 6: Transaction COMMIT'
 \echo '========================================='
 
-\echo 'All documents with "rust":'
-SELECT e.id, e.title, s.score
-FROM e2e_test e
-JOIN bm25_search('e2e_test', 'content', 'rust') s 
-  ON true  -- Join all for display purposes
-ORDER BY s.score DESC
-LIMIT 10;
+-- Test that COMMIT persists index changes
+\echo 'Starting transaction and inserting a document...'
+BEGIN;
+INSERT INTO e2e_test (title, content) VALUES
+    ('Commit Test', 'This committed document should be searchable after commit');
+\echo 'Committing transaction...'
+COMMIT;
+
+-- Search for the committed content - should find it
+\echo 'Searching for "committed" (should find 1 - transaction was committed)...'
+SELECT 
+    CASE WHEN COUNT(*) = 1 
+    THEN '✓ COMMIT test passed - index changes were persisted' 
+    ELSE '✗ ERROR: Committed content not found in index!'
+    END as status
+FROM bm25_search('e2e_test', 'content', 'committed');
+
+\echo ''
+\echo '========================================='
+\echo 'TEST 7: Multi-Statement Transaction'
+\echo '========================================='
+
+\echo 'Complex transaction with multiple operations...'
+BEGIN;
+INSERT INTO e2e_test (title, content) VALUES
+    ('Multi 1', 'Transaction batch insert first document');
+INSERT INTO e2e_test (title, content) VALUES
+    ('Multi 2', 'Transaction batch insert second document');
+UPDATE e2e_test SET content = 'Transaction updated to batch mode' WHERE title = 'Commit Test';
+COMMIT;
+
+\echo 'Searching for "batch" (should find 3 results)...'
+SELECT 
+    CASE WHEN COUNT(*) = 3 
+    THEN '✓ Multi-statement transaction test passed' 
+    ELSE '✗ ERROR: Expected 3 results, found ' || COUNT(*)
+    END as status
+FROM bm25_search('e2e_test', 'content', 'batch');
 
 \echo ''
 \echo '========================================='
@@ -145,10 +198,10 @@ LIMIT 10;
 SELECT 
     '[Test Suite Complete]' as status,
     COUNT(*) as total_documents,
-    (SELECT COUNT(*) FROM bm25_search('e2e_test', 'content', 'rust')) as rust_documents
+    (SELECT COUNT(*) FROM bm25_search('e2e_test', 'content', 'rust')) as rust_documents,
+    (SELECT COUNT(*) FROM bm25_search('e2e_test', 'content', 'batch')) as batch_documents
 FROM e2e_test;
 
 \echo ''
-\echo '✓ All trigger tests completed successfully!'
-\echo 'Trigger-based auto-sync is working correctly.'
+\echo '✓ All trigger tests completed!'
 \echo ''

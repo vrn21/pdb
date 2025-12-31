@@ -1,6 +1,14 @@
 //! # Search Module
 //!
 //! This module handles searching existing BM25 indexes and returning ranked results.
+//!
+//! ## Return Values
+//! Search functions return the table's actual primary key, enabling easy JOINs:
+//! ```sql
+//! SELECT t.*, s.score
+//! FROM my_table t
+//! JOIN bm25_search('my_table', 'content', 'query') s ON t.id = s.pk;
+//! ```
 
 use pgrx::iter::TableIterator;
 use pgrx::prelude::*;
@@ -23,7 +31,13 @@ fn get_index_path(table_name: &str, column_name: &str) -> PathBuf {
 /// # SQL Usage:
 /// ```sql
 /// SELECT * FROM bm25_search('articles', 'body', 'rust programming');
-/// -- Returns: row_id | score
+/// -- Returns: pk | score
+///
+/// -- Join with original table:
+/// SELECT a.*, s.score
+/// FROM articles a
+/// JOIN bm25_search('articles', 'body', 'rust') s ON a.id = s.pk
+/// ORDER BY s.score DESC;
 /// ```
 ///
 /// # Query Syntax:
@@ -37,10 +51,8 @@ pub fn bm25_search(
     table_name: &str,
     column_name: &str,
     query_text: &str,
-) -> Result<
-    TableIterator<'static, (name!(row_id, i64), name!(score, f32))>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<TableIterator<'static, (name!(pk, i64), name!(score, f32))>, Box<dyn std::error::Error>>
+{
     bm25_search_limit(table_name, column_name, query_text, 100)
 }
 
@@ -49,7 +61,7 @@ pub fn bm25_search(
 /// # SQL Usage:
 /// ```sql
 /// SELECT * FROM bm25_search_limit('articles', 'body', 'rust AND fast', 10);
-/// -- Returns top 10: row_id | score
+/// -- Returns top 10: pk | score
 /// ```
 ///
 /// # Arguments:
@@ -63,10 +75,8 @@ pub fn bm25_search_limit(
     column_name: &str,
     query_text: &str,
     limit: i32,
-) -> Result<
-    TableIterator<'static, (name!(row_id, i64), name!(score, f32))>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<TableIterator<'static, (name!(pk, i64), name!(score, f32))>, Box<dyn std::error::Error>>
+{
     // 1. Check if index exists
     let index_path = get_index_path(table_name, column_name);
     if !index_path.exists() {
@@ -80,7 +90,7 @@ pub fn bm25_search_limit(
     // 2. Open index
     let index = Index::open_in_dir(&index_path)?;
     let schema = index.schema();
-    let row_id_field = schema.get_field("row_id")?;
+    let pk_field = schema.get_field("pk")?;
     let content_field = schema.get_field("content")?;
 
     // 3. Create searcher
@@ -99,8 +109,8 @@ pub fn bm25_search_limit(
     for (score, doc_address) in top_docs {
         let doc: tantivy::TantivyDocument = searcher.doc(doc_address)?;
 
-        if let Some(tantivy::schema::OwnedValue::U64(row_id_u64)) = doc.get_first(row_id_field) {
-            results.push((*row_id_u64 as i64, score));
+        if let Some(tantivy::schema::OwnedValue::I64(pk)) = doc.get_first(pk_field) {
+            results.push((*pk, score));
         }
     }
 

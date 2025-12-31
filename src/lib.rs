@@ -17,6 +17,9 @@ pub mod trigger;
 /// Utility functions: index info, diagnostics
 pub mod utils;
 
+/// Transaction-aware writer: buffers operations until commit
+pub mod writer;
+
 // This macro registers the extension with PostgreSQL.
 // It tells Postgres: "This is an extension called 'pdb' at version X"
 ::pgrx::pg_module_magic!();

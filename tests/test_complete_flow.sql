@@ -14,7 +14,7 @@ CREATE EXTENSION IF NOT EXISTS pdb;
 \echo '========================================='
 
 CREATE TABLE articles (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     title TEXT,
     body TEXT
 );
