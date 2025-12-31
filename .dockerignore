@@ -1,0 +1,20 @@
+# Git
+.git
+.gitignore
+
+# Rust build artifacts
+target/
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation (except README)
+*.md
+!README.md
+
+# Tests (mounted at runtime, not needed in build context)
+tests/
+
+# Local configs
+.cargo/

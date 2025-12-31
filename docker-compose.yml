@@ -1,0 +1,39 @@
+services:
+  pdb-postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PG_VERSION: "17"
+        PGRX_VERSION: "0.16.1"
+    container_name: pdb-postgres-dev
+    
+    ports:
+      - "5432:5432"
+    
+    environment:
+      POSTGRES_USER: pdb
+      POSTGRES_PASSWORD: pdb_dev_password
+      POSTGRES_DB: pdb_dev
+      PDB_INDEX_PATH: /var/lib/pdb_indexes
+    
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pdb_indexes:/var/lib/pdb_indexes
+      - ./tests:/tests:ro
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdb -d pdb_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    driver: local
+  pdb_indexes:
+    driver: local
