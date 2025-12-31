@@ -99,10 +99,8 @@ pub fn bm25_search_limit(
     for (score, doc_address) in top_docs {
         let doc: tantivy::TantivyDocument = searcher.doc(doc_address)?;
 
-        if let Some(row_id_value) = doc.get_first(row_id_field) {
-            if let tantivy::schema::OwnedValue::U64(row_id_u64) = row_id_value {
-                results.push((*row_id_u64 as i64, score));
-            }
+        if let Some(tantivy::schema::OwnedValue::U64(row_id_u64)) = doc.get_first(row_id_field) {
+            results.push((*row_id_u64 as i64, score));
         }
     }
 
@@ -115,5 +113,5 @@ pub fn bm25_search_limit(
     );
 
     // 7. Return as table
-    Ok(TableIterator::new(results.into_iter()))
+    Ok(TableIterator::new(results))
 }

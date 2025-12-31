@@ -33,13 +33,88 @@ fn get_index_path(table_name: &str, column_name: &str) -> PathBuf {
 ///
 /// ctid format: "(block,offset)" e.g. "(0,1)"
 /// We hash this string to get a u64 for use as Tantivy document ID
-fn hash_ctid_string(ctid: &str) -> u64 {
+pub(crate) fn hash_ctid_string(ctid: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
     ctid.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Ensures the metadata table exists for tracking indexed columns
+fn ensure_metadata_table() -> Result<(), Box<dyn std::error::Error>> {
+    Spi::run(
+        "
+        CREATE TABLE IF NOT EXISTS pdb_index_metadata (
+            table_name TEXT NOT NULL,
+            column_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            PRIMARY KEY (table_name, column_name)
+        )
+    ",
+    )?;
+    Ok(())
+}
+
+/// Register an index in the metadata table
+fn register_index_metadata(
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    ensure_metadata_table()?;
+
+    Spi::run(&format!(
+        "INSERT INTO pdb_index_metadata (table_name, column_name) VALUES ('{}', '{}')",
+        table_name, column_name
+    ))?;
+
+    Ok(())
+}
+
+/// Unregister an index from the metadata table
+fn unregister_index_metadata(
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Spi::run(&format!(
+        "DELETE FROM pdb_index_metadata WHERE table_name = '{}' AND column_name = '{}'",
+        table_name, column_name
+    ))?;
+
+    Ok(())
+}
+
+/// Create a sync trigger for automatic index updates
+fn create_sync_trigger(
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trigger_name = format!("pdb_sync_{}_{}", table_name, column_name);
+
+    Spi::run(&format!(
+        "CREATE TRIGGER {} 
+         AFTER INSERT OR UPDATE OR DELETE ON {} 
+         FOR EACH ROW EXECUTE FUNCTION pdb_sync_trigger()",
+        trigger_name, table_name
+    ))?;
+
+    Ok(())
+}
+
+/// Drop a sync trigger
+fn drop_sync_trigger(
+    table_name: &str,
+    column_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trigger_name = format!("pdb_sync_{}_{}", table_name, column_name);
+
+    Spi::run(&format!(
+        "DROP TRIGGER IF EXISTS {} ON {}",
+        trigger_name, table_name
+    ))?;
+
+    Ok(())
 }
 
 /// Creates a BM25 search index on a text column.
@@ -121,8 +196,13 @@ pub fn create_bm25_index(
     writer.commit()?;
 
     let count = indexed_count.load(std::sync::atomic::Ordering::Relaxed);
+
+    // 6. Register in metadata table and create trigger
+    register_index_metadata(table_name, column_name)?;
+    create_sync_trigger(table_name, column_name)?;
+
     pgrx::info!(
-        "✓ Created BM25 index on {}.{} ({} documents)",
+        "✓ Created BM25 index on {}.{} ({} documents) with automatic sync",
         table_name,
         column_name,
         count
@@ -144,7 +224,15 @@ pub fn drop_bm25_index(
     let index_path = get_index_path(table_name, column_name);
 
     if index_path.exists() {
+        // 1. Drop trigger first
+        drop_sync_trigger(table_name, column_name)?;
+
+        // 2. Unregister from metadata
+        unregister_index_metadata(table_name, column_name)?;
+
+        // 3. Remove index files
         std::fs::remove_dir_all(&index_path)?;
+
         pgrx::info!("Dropped BM25 index on {}.{}", table_name, column_name);
     } else {
         pgrx::warning!("Index does not exist: {}.{}", table_name, column_name);
