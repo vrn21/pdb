@@ -20,6 +20,9 @@ pub mod utils;
 /// Transaction-aware writer: buffers operations until commit
 pub mod writer;
 
+/// Inline search operators: pdb_match() and pdb_score() for WHERE clauses
+pub mod operator;
+
 // This macro registers the extension with PostgreSQL.
 // It tells Postgres: "This is an extension called 'pdb' at version X"
 ::pgrx::pg_module_magic!();
