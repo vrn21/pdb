@@ -1,0 +1,192 @@
+# StatefulSet for PostgreSQL with pdb extension
+# Why StatefulSet (not Deployment)?
+#   - Stable pod names: pdb-postgres-0
+#   - Stable network identity via headless service
+#   - Persistent storage that survives pod restarts
+#   - Ordered startup (important for future replicas)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pdb-postgres
+  namespace: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/version: "17"
+spec:
+  serviceName: pdb-postgres-headless  # Required for DNS
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pdb
+      app.kubernetes.io/component: database
+  
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pdb
+        app.kubernetes.io/component: database
+    spec:
+      # Give Postgres time to checkpoint before SIGKILL
+      terminationGracePeriodSeconds: 60
+      
+      # Security: run as postgres user (uid 999 in official image)
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+      
+      restartPolicy: Always
+      
+      containers:
+        - name: postgres
+          # Image will be set by Kustomize overlay or deploy script
+          image: pdb-postgres:local
+          imagePullPolicy: IfNotPresent
+          
+          # Container-level security
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Postgres needs to write
+            capabilities:
+              drop:
+                - ALL
+          
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          
+          # Environment from secrets and configmap
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: pdb-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdb-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: pdb-config
+                  key: POSTGRES_DB
+            - name: PDB_INDEX_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: pdb-config
+                  key: PDB_INDEX_PATH
+            # PGDATA must be a subdirectory of the mount point
+            # Docker entrypoint expects to own the mount point
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          
+          # Volume mounts
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: pdb-indexes
+              mountPath: /var/lib/pdb_indexes
+          
+          # Resource limits - adjust via overlay for different environments
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          
+          #--------------------------------------
+          # Health Checks
+          #--------------------------------------
+          
+          # Startup probe: allows slow first-boot (initdb can take 30-60s)
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 5
+            failureThreshold: 60  # 5s * 60 = 5 min max startup
+          
+          # Liveness: restart if Postgres becomes unresponsive
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6  # 6 * 10s = 60s of failures before restart
+          
+          # Readiness: remove from service if not ready
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+          
+          #--------------------------------------
+          # Lifecycle Hooks
+          #--------------------------------------
+          lifecycle:
+            preStop:
+              exec:
+                # Graceful shutdown: stop connections, checkpoint, clean exit
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    echo "Initiating graceful PostgreSQL shutdown..."
+                    # Fast shutdown: complete current transactions, no new connections
+                    pg_ctl stop -D "$PGDATA" -m fast -t 30 || true
+                    echo "Shutdown complete"
+  
+  #--------------------------------------
+  # Persistent Volume Claims
+  #--------------------------------------
+  volumeClaimTemplates:
+    # PostgreSQL data directory
+    - metadata:
+        name: pgdata
+        labels:
+          app.kubernetes.io/name: pdb
+          app.kubernetes.io/component: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName will be set by overlay or use cluster default
+        resources:
+          requests:
+            storage: 5Gi
+    
+    # Tantivy search index storage
+    - metadata:
+        name: pdb-indexes
+        labels:
+          app.kubernetes.io/name: pdb
+          app.kubernetes.io/component: indexes
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

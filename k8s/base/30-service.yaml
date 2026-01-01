@@ -1,0 +1,48 @@
+# Services for PostgreSQL access
+# Two services serve different purposes:
+#   1. pdb-postgres: ClusterIP for load-balanced access
+#   2. pdb-postgres-headless: Direct pod access, required for StatefulSet DNS
+---
+# Primary service - applications connect here
+# DNS: pdb-postgres.pdb.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdb-postgres
+  namespace: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+
+---
+# Headless service for StatefulSet
+# Provides stable DNS for individual pods:
+#   pdb-postgres-0.pdb-postgres-headless.pdb.svc.cluster.local
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdb-postgres-headless
+  namespace: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  clusterIP: None  # This makes it headless
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  selector:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database

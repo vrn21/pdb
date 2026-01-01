@@ -1,0 +1,39 @@
+# AWS overlay for deploying to EC2/k3s or EKS
+# Uses local-storage class for k3s PVs and pulls from ECR
+#
+# Before applying:
+# 1. Update the image newName below with your ECR URL
+# 2. Push image to ECR: docker push <ECR_URL>/pdb-postgres:17
+#
+# Apply with: kubectl apply -k k8s/overlays/aws
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Inherit from base
+resources:
+  - ../../base
+
+namespace: pdb
+
+# Add AWS-specific labels
+labels:
+  - pairs:
+      environment: aws
+      cloud: aws
+    includeSelectors: false
+
+# Patch StatefulSet for AWS
+patches:
+  - path: resource-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: pdb-postgres
+
+# Override image for ECR
+# IMPORTANT: Replace <ACCOUNT_ID> with your AWS account ID
+images:
+  - name: pdb-postgres
+    newName: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/pdb-postgres
+    newTag: "17"

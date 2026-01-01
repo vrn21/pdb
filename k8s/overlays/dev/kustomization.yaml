@@ -1,0 +1,33 @@
+# Development overlay for local testing with kind/k3s
+# Applies smaller resource limits suitable for laptop development
+#
+# Apply with: kubectl apply -k k8s/overlays/dev
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Inherit from base
+resources:
+  - ../../base
+
+# Override namespace annotations for dev
+namespace: pdb
+
+# Add dev-specific labels
+labels:
+  - pairs:
+      environment: development
+    includeSelectors: false
+
+# Patch StatefulSet with smaller resources
+patches:
+  - path: resource-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: pdb-postgres
+
+# Override image for local development
+images:
+  - name: pdb-postgres
+    newTag: local

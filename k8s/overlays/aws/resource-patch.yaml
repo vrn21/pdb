@@ -1,0 +1,33 @@
+# Patch to adjust resources and storage for AWS t3.micro
+# t3.micro: 2 vCPU, 1GB RAM - need small limits
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pdb-postgres
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "768Mi"  # Leave room for k3s on 1GB instance
+              cpu: "1000m"
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        storageClassName: local-storage
+        resources:
+          requests:
+            storage: 8Gi
+    - metadata:
+        name: pdb-indexes
+      spec:
+        storageClassName: local-storage
+        resources:
+          requests:
+            storage: 5Gi

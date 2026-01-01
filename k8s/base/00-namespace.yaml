@@ -1,0 +1,10 @@
+# Namespace for all pdb resources
+# Provides isolation and easy cleanup: kubectl delete namespace pdb
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/managed-by: kustomize

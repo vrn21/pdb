@@ -1,0 +1,56 @@
+# ConfigMap for PostgreSQL configuration
+# Non-sensitive settings: database name, tuning params, extension paths
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdb-config
+  namespace: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+data:
+  # Database name to create on startup
+  POSTGRES_DB: "pdb"
+  
+  # Path where Tantivy indexes are stored
+  PDB_INDEX_PATH: "/var/lib/pdb_indexes"
+  
+  # PostgreSQL tuning for small instance (adjust per environment)
+  # These values assume ~2GB RAM available to PostgreSQL
+  postgresql.conf: |
+    #--------------------------------------
+    # Memory Configuration
+    #--------------------------------------
+    shared_buffers = 512MB            # 25% of available RAM
+    effective_cache_size = 1536MB     # 75% of available RAM
+    work_mem = 16MB                   # Per-operation memory
+    maintenance_work_mem = 128MB      # For VACUUM, CREATE INDEX
+    
+    #--------------------------------------
+    # WAL Configuration
+    #--------------------------------------
+    wal_level = replica               # Enables streaming replication
+    max_wal_size = 1GB
+    min_wal_size = 256MB
+    checkpoint_completion_target = 0.9
+    
+    #--------------------------------------
+    # Query Planner (SSD-optimized)
+    #--------------------------------------
+    random_page_cost = 1.1            # SSD: 1.1, HDD: 4.0
+    effective_io_concurrency = 200    # SSD: 200, HDD: 2
+    default_statistics_target = 100
+    
+    #--------------------------------------
+    # Connection Settings
+    #--------------------------------------
+    max_connections = 50              # Reduced for local dev
+    
+    #--------------------------------------
+    # Logging (K8s-friendly)
+    #--------------------------------------
+    log_destination = 'stderr'        # K8s captures stderr
+    logging_collector = off           # Let K8s handle log aggregation
+    log_statement = 'ddl'             # Log DDL statements
+    log_min_duration_statement = 1000 # Log queries > 1 second
+    log_line_prefix = '%t [%p]: '

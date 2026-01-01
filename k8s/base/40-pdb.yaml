@@ -1,0 +1,23 @@
+# Pod Disruption Budget
+# Prevents accidental eviction during:
+#   - Node drain/maintenance
+#   - Cluster upgrades
+#   - kubectl delete with grace period
+#
+# With replicas=1, minAvailable=1 means:
+#   "Never voluntarily evict this pod"
+# Cluster operators must force-delete if urgent
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-postgres-pdb
+  namespace: pdb
+  labels:
+    app.kubernetes.io/name: pdb
+    app.kubernetes.io/component: database
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pdb
+      app.kubernetes.io/component: database
